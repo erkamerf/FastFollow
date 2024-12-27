@@ -1,7 +1,7 @@
 # FastFollow
-## as originally written by DiscipleofEris
+## as originally written by [DiscipleofEris](https://github.com/DiscipleOfEris/Windower4Addons/tree/main/FastFollow)
 FFXI Windower addon that allows multiboxers to follow more easily and keep their characters more tightly grouped. ONLY
-WORKS WITH MULTIBOXERS. Note that this is NOT the same as `/follow`. You must use `//ffo <name>` or `//ffo me` to start
+WORKS WITH MULTIBOXERS - all accounts on one machine. Note that this is NOT the same as `/follow`. You must use `//ffo <name>` or `//ffo me` to start
 following.
 
 
@@ -48,19 +48,20 @@ Make this character stop following.
 
 Stop following on all characters.
 
-#### pauseon \<spells|items|dismount\>
+#### pauseon \<spells|items|dismount|any\>
 
     //ffo pauseon spells
     //ffo pauseon items
     //ffo pauseon dismount
+    //ffo pauseon any
 
-Use auto-pausing to temporarily stop following to cast spells, etc.
+Use auto-pausing to temporarily stop following to cast specified spells, etc. Use 'any' to allow auto-pausing regardless of spell, item, etc.
 
 #### pausedelay \<delay\>
 
     //ffo pausedelay 0.2
 
-Choose how long to wait for following to correctly stop before doing the action.
+Choose how long to wait, in seconds, for following to correctly stop before doing the action.
 
 #### min \<distance\>
     //ffo min <distance>
