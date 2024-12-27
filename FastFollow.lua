@@ -1,6 +1,6 @@
 _addon.name = 'FastFollow'
-_addon.author = 'DiscipleOfEris'
-_addon.version = '1.2.3'
+_addon.author = 'DiscipleOfEris, Safety Modification by Daneblood'
+_addon.version = '1.2.3b'
 _addon.commands = {'fastfollow', 'ffo'}
 
 -- TODO: pause on ranged attacks.
@@ -9,7 +9,6 @@ require('strings')
 require('tables')
 require('sets')
 require('coroutine')
-packets = require('packets')
 res = require('resources')
 spells = require('spell_cast_times')
 items = res.items
@@ -55,7 +54,6 @@ zone_suppress = 3
 zone_min_dist = 1.0^2
 zoned = false
 running = false
-casting = nil
 cast_time = 0
 pause_delay = 0.1
 pause_dismount_delay = 0.5
@@ -102,7 +100,6 @@ windower.register_event('addon command', function(command, ...)
     if #args == 0 then
       return windower.add_to_chat(0, 'FastFollow: You must provide a player name to follow.')
     end
-    casting = nil
     following = args[1]:lower()
     windower.send_ipc_message('following '..following)
     windower.ffxi.follow()
@@ -168,7 +165,6 @@ windower.register_event('ipc message', function(msgStr)
   elseif command == 'follow' then
     if following then windower.send_ipc_message('stopfollowing '..following) end
     following = args[1]
-    casting = nil
     target_pos = nil
     last_target_pos = nil
     windower.send_ipc_message('following '..following)
@@ -230,11 +226,6 @@ windower.register_event('prerender', function()
       windower.send_ipc_message('update '..self.name..' '..info.zone..' '..self.x..' '..self.y)
     end
     
-    if casting then
-      windower.ffxi.run(false)
-      running = false
-      return
-    end
     if not target then
       if running then
         windower.ffxi.run(false)
@@ -260,130 +251,6 @@ windower.register_event('prerender', function()
   end
 end)
 
-local PACKET_OUT = { ACTION = 0x01A, USE_ITEM = 0x037, REQUEST_ZONE = 0x05E }
-local PACKET_INC = { ACTION = 0x028 }
-local PACKET_ACTION_CATEGORY = { MAGIC_CAST = 0x03, DISMOUNT = 0x12 }
-local EVENT_ACTION_CATEGORY = { SPELL_FINISH = 4, ITEM_FINISH = 5, SPELL_BEGIN_OR_INTERRUPT = 8, ITEM_BEGIN_OR_INTERRUPT = 9 }
-local EVENT_ACTION_PARAM = { BEGIN = 24931, INTERRUPT = 28787 }
-
-windower.register_event('outgoing chunk', function(id, original, modified, injected, blocked)
-  if blocked then return end
-  
-  if id == PACKET_OUT.REQUEST_ZONE then
-    if follow_me > 0 then
-      local packet = packets.parse('outgoing', modified)
-      local self = windower.ffxi.get_mob_by_target('me')
-      
-      windower.send_ipc_message('zone %s %d %d':format(self.name, packet['Zone Line'], packet['Type']))
-    end
-    
-    if following and (os.clock() - last_zone) < zone_suppress then
-      return true
-    else
-      last_zone = os.clock()
-    end
-  elseif id == PACKET_OUT.ACTION and not casting then
-    if not pauseon:contains('spell') and not pauseon:contains('dismount') then return end
-    
-    local packet = packets.parse('outgoing', modified)
-    if packet.Category ~= PACKET_ACTION_CATEGORY.MAGIC_CAST and packet.CATEGORY ~= PACKET_ACTION_CATEGORY.DISMOUNT then return end
-    if packet.Category == PACKET_ACTION_CATEGORY.MAGIC_CAST and not pauseon:contains('spell') then return end
-    if packet.Category == PACKET_ACTION_CATEGORY.DISMOUNT and not pauseon:contains('dismount') then return end
-    
-    local cast_attempt = os.clock()
-    casting = cast_attempt
-    if pause_delay <= 0 then return end
-    
-    windower.ffxi.run(false)
-    running = false
-    coroutine.schedule(function()
-      packets.inject(packet)
-    end, pause_delay)
-    
-    local delay = pause_dismount_delay
-    if packet.Category == PACKET_ACTION_CATEGORY.MAGIC_CAST then
-      -- TODO: Maybe get a little smarter, such as checking if the target is within range, we have sufficient mp, etc.
-      local spell = spells[packet.Param]
-      delay = spell.cast_time + 0.5
-    end
-    
-    if co then coroutine.close(co) end
-    co = coroutine.schedule(function()
-      if casting and not (casting > cast_attempt) then
-        casting = false
-      end
-    end, pause_delay+0.5)
-    
-    return true
-  elseif id == PACKET_OUT.USE_ITEM and not casting then
-    if not pauseon:contains('item') then return end
-    
-    casting = os.time()
-    if pause_delay <= 0 then return end
-    
-    local packet = packets.parse('outgoing', modified)
-    
-    local item = items[packet.Param]
-    if not item or not item.cast_time then return end
-    
-    local cast_time = os.time()
-    casting = cast_time
-    
-    coroutine.schedule(function()
-      packets.inject(packets.parse('outgoing', modified))
-    end, pause_delay)
-    
-    if co then coroutine.close(co) end
-    co = coroutine.schedule(function()
-      if casting ~= cast_time then return end
-      casting = false
-    end, pause_delay+item.cast_time)
-    
-    return true
-  end
-end)
-
-windower.register_event('action', function(action)
-  local player = windower.ffxi.get_player()
-  if not player or action.actor_id ~= player.id then return end
-
-  if action.category == EVENT_ACTION_CATEGORY.SPELL_FINISH or (action.category == EVENT_ACTION_CATEGORY.SPELL_BEGIN_OR_INTERRUPT and action.param == EVENT_ACTION_PARAM.INTERRUPT) then
-    casting = false
-  elseif action.category == EVENT_ACTION_CATEGORY.ITEM_FINISH or (action.category == EVENT_ACTION_CATEGORY.ITEM_BEGIN_OR_INTERRUPT and action.param == EVENT_ACTION_PARAM.INTERRUPT) then
-    casting = false
-  elseif action.category == EVENT_ACTION_CATEGORY.SPELL_BEGIN_OR_INTERRUPT and action.param == EVENT_ACTION_PARAM.BEGIN then
-    casting = os.clock()
-  end
-end)
-
-function zone(zone_line, zone_type, zone, x, y)
-  coroutine.sleep(0.2 + math.random()*2.5)
-  local self = windower.ffxi.get_mob_by_target('me')
-  local info = windower.ffxi.get_info()
-  
-  if not self or not info or info.zone ~= zone then return end
-  
-  local packet = packets.new('outgoing', PACKET_OUT.REQUEST_ZONE, {
-    ['Zone Line'] = zone_line,
-    ['Type'] = zone_type
-  })
-  
-  local pos = {x=x, y=y}
-  local distSq = distanceSquared(self, pos)
-  local i = 0
-  while distSq > zone_min_dist and i < 12 do
-    coroutine.sleep(0.25)
-    self = windower.ffxi.get_mob_by_target('me')
-    if not self then return end
-    distSq = distanceSquared(self, pos)
-    i = i + 1
-  end
-  
-  if distSq <= zone_min_dist then
-    packets.inject(packet)
-    last_zone = os.clock()
-  end
-end
 
 function updateInfo()
   box:visible(settings.show)
